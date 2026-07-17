@@ -1,0 +1,39 @@
+# Secrets / credentials
+.env
+.env.*
+*.key
+*.pem
+*credentials*
+*secret*
+
+# Published artifacts and run output
+output/
+*.log
+
+# Local surge credentials cache (never commit)
+.surge/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual envs
+venv/
+.venv/
+env/
+ENV/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

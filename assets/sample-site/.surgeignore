@@ -1,0 +1,21 @@
+# Example .surgeignore — same syntax as .gitignore
+# Exclude files you don't want published to Surge.
+
+# Source files
+src/
+*.md
+*.log
+
+# Version control
+.git
+.gitignore
+
+# Build tooling
+node_modules/
+package-lock.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
