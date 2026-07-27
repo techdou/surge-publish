@@ -1,4 +1,26 @@
-# Surge Publish Skill
+# Surge Publish Skill | Surge 发布 Skill
+
+[English](#english) | [中文](#中文)
+
+---
+
+<a id="中文"></a>
+## 中文
+
+可移植 Agent Skill，把静态 Web 项目（HTML/CSS/JS、单页应用、生成的站点）一键发布到 [surge.sh](https://surge.sh) 全球 CDN。
+
+### 触发场景
+
+- 发布静态站点、部署 dist/ 目录、托管 landing page
+- 设置预览 URL、回滚部署、管理 surge.sh 域名
+- 配置 DNS、签发 SSL、敏感文件泄露检查
+
+下方英文为完整文档。
+
+---
+
+<a id="english"></a>
+## English
 
 A [ZCode](https://zcode.ai) / Claude Code / OpenCode agent skill for publishing static web projects to [surge.sh](https://surge.sh) — a global CDN for HTML/CSS/JS, single-page apps, and generated sites.
 

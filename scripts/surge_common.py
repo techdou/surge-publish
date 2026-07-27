@@ -25,6 +25,16 @@ from typing import Any, Dict, List, Optional, Sequence
 SKILL_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SAMPLE_SITE = SKILL_ROOT / "assets" / "sample-site"
 
+# ── .env fallback: load skill-local .env so SURGE_TOKEN survives PC switches ──
+# shell-exported vars still win (override=False); dotenv missing → silent skip.
+try:
+    from dotenv import load_dotenv as _load_dotenv
+    _env_path = SKILL_ROOT / ".env"
+    if _env_path.is_file():
+        _load_dotenv(_env_path, override=False)
+except ImportError:
+    pass
+
 # Files Surge reads from the project directory as configuration.
 CONFIG_FILES = {
     "CNAME": "Target domain (single line)",
