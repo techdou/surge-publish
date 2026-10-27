@@ -1,7 +1,7 @@
 ---
 name: surge-publish
-version: 1.0.0
-description: Publish static web projects (HTML/CSS/JS, single-page apps, generated sites) to the web via surge.sh. Use whenever the user wants to deploy a static site, publish a build folder, put HTML online, host a landing page, share a dist/ directory, set up a preview URL, roll back a deploy, manage a surge.sh domain, configure DNS, provision SSL, or anything involving surge.sh — even if they don't say "surge" explicitly. Covers project pre-flight checks (CNAME, index.html, 200.html SPA shell, .surgeignore, sensitive-file leaks), non-interactive publishing with SURGE_TOKEN, preview deploys, revisions/rollback, custom domains, DNS, and SSL.
+version: 1.1.0
+description: Publish static web projects (HTML/CSS/JS, single-page apps, generated sites) to the web via surge.sh, with mandatory content-level post-publish verification. Use whenever the user wants to deploy a static site, publish a build folder, put HTML online, host a landing page, share a dist/ directory, set up a preview URL, roll back a deploy, manage a surge.sh domain, configure DNS, provision SSL, or anything involving surge.sh — even if they don't say "surge" explicitly. Covers project pre-flight checks (CNAME, index.html, 200.html SPA shell, .surgeignore, sensitive-file leaks), non-interactive publishing with SURGE_TOKEN, content-verified deploys (Success-marker + live-content markers, not just HTTP 200), preview deploys, revisions/rollback, custom domains, DNS, and SSL.
 ---
 
 # Surge Publish Skill
@@ -20,6 +20,8 @@ Use this skill when the user wants to put a static web project on the web using 
 |---|---|
 | Check a project before publishing (no surge call) | `python scripts/surge_cli.py check <path>` |
 | Publish a directory | `python scripts/surge_cli.py publish <path> --domain <domain>` |
+| Publish + verify live content in one step | `publish <path> --domain <domain> --verify-contains "<new-revision marker>"` |
+| Verify a live URL serves the NEW revision | `python scripts/surge_cli.py verify <url> --contains "<marker>"` |
 | Publish a preview (separate URL, prod untouched) | `python scripts/surge_cli.py publish <path> --preview` |
 | List projects or revisions | `python scripts/surge_cli.py list [domain]` |
 | Roll back / forward / cut over | `python scripts/surge_cli.py rollback <domain>` |
@@ -35,8 +37,32 @@ All commands accept `--format json` for structured output. Pass `--token` or set
 
 1. **Pre-flight check**: `check <path>` verifies index.html (or 200.html SPA shell), reads CNAME, flags sensitive files (.env, .git) that would be published, and warns about missing `.surgeignore`. Use `--fix-ignore` to auto-write a merged `.surgeignore` from `.gitignore`.
 2. **Publish**: `publish <path> --domain <domain>` runs the check first (unless `--no-check`) and refuses to publish if issues are found (override with `--force`).
-3. **Verify**: the publish command extracts the live URL from surge's output.
+3. **Verify (mandatory, see next section)**: `publish` succeeds only when surge prints an explicit success marker; then prove the live content with `verify`.
 4. **Roll back if needed**: `rollback <domain>` restores the previous revision.
+
+## Post-publish verification (mandatory — applies to surge and every similar deploy CLI)
+
+These rules exist because of a real failure mode: a publish that exited 0, printed no success marker, and never actually uploaded — while the caller declared victory off a bare HTTP 200 and shipped a stale site. The rules are CLI-agnostic; apply them to Netlify/Vercel/gh-pages/CDN uploads just the same.
+
+**Rule 1 — "command finished" is not "published".** A deploy CLI can exit 0 while silently failing (interactive prompt swallowed, connection dropped mid-upload, expired token). Success requires an explicit confirmation marker in the output (surge prints `Success! - Published to <domain>`). No marker → treat as NOT published → re-run. `publish` in this skill enforces this: exit 0 without a marker is reported as `[FAIL]` with a hint.
+
+**Rule 2 — HTTP 200 proves nothing about WHICH revision is live.** After publishing, do content-level verification: fetch the live page and require a marker that exists only in the NEW revision (freshly added copy, a new image filename, a version string, a changed `<title>`). `verify <url> --contains "<marker>"` does this with cache-busting; repeat `--contains` for multiple markers, all must match. Exit code: 0 verified / 2 mismatch — scriptable in CI.
+
+**Rule 3 — bust the caches at every layer.** The verify fetch adds a cache-busting query param and no-cache headers (built in). Even then, the *user's* browser may serve a stale copy — after content verification passes, tell the user to hard-refresh (Ctrl+F5 / Cmd+Shift+R) if they still see the old version.
+
+**Rule 4 — verify → republish → re-verify until green.** If verification fails, republish and re-verify; do not report success on the strength of the first publish attempt. If republish keeps failing, check `whoami` (auth) and `list <domain>` (revision state) before debugging anything else.
+
+Standard loop:
+
+```bash
+python scripts/surge_cli.py publish ./dist --domain example.com \
+  --verify-contains "marker only in the new build"
+# or split:
+python scripts/surge_cli.py publish ./dist --domain example.com
+python scripts/surge_cli.py verify https://example.com/ --contains "new-build marker"
+```
+
+Pick markers from the diff, not from thin air — e.g. the page you just changed, a renamed asset (`v2-banner.jpg`), or a new section heading. Markers that exist in both old and new revisions verify nothing.
 
 ## What every Surge project gets
 

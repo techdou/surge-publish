@@ -97,7 +97,13 @@ def cmd_whoami(args: argparse.Namespace) -> int:
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
-    """Publish a directory. Runs pre-flight check unless --no-check."""
+    """Publish a directory. Runs pre-flight check unless --no-check.
+
+    Success requires BOTH returncode 0 AND an explicit success marker in
+    surge's output ("Success!" / a published URL). surge can exit 0 while
+    silently failing (swallowed interactive prompt, network hiccup), so a
+    bare returncode is not proof of publication.
+    """
     path = Path(args.path).resolve()
     if not args.no_check:
         chk = sc.check_project(path)
@@ -113,19 +119,76 @@ def cmd_publish(args: argparse.Namespace) -> int:
     result = sc.run_surge(surge_args, cwd=path, check=False,
                           token=args.token, timeout=args.timeout)
     url = sc.extract_published_url(result.stdout)
+    confirmed = bool(url) or ("success" in result.stdout.lower())
     payload = {
-        "ok": result.ok,
+        "ok": result.ok and confirmed,
+        "confirmed": confirmed,
         "url": url,
         "domain": args.domain,
         "preview": bool(args.preview),
         "returncode": result.returncode,
         "output": result.output(),
     }
+    if result.ok and not confirmed:
+        payload["hint"] = ("surge exited 0 but printed no success marker — "
+                           "treat this as NOT published; re-run and check output")
     _emit(payload, fmt=args.format, text_fn=lambda p: (
         f"{'[OK]' if p['ok'] else '[FAIL]'} {p.get('url') or p.get('domain') or 'publish'}\n"
+        + (p.get("hint") or "")
         + (p.get("output") or "")
     ))
-    return 0 if result.ok else 1
+    if not payload["ok"]:
+        return 1
+    if args.verify_contains:
+        target = url or args.domain
+        return cmd_verify(argparse.Namespace(
+            url=("https://" + target if target and not target.startswith("http") else target),
+            contains=args.verify_contains, timeout=30, format=args.format))
+    return 0
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Content-level verification of a live URL.
+
+    Fetches with a cache-busting query param + no-cache headers, then requires
+    every --contains marker to appear in the body. HTTP 200 alone proves
+    nothing about which revision is being served.
+    """
+    import random
+    import time
+    import urllib.request
+
+    bust = (f"{args.url}{'&' if '?' in args.url else '?'}"
+            f"_v={int(time.time())}{random.randint(100, 999)}")
+    req = urllib.request.Request(bust, headers={
+        "Cache-Control": "no-cache, max-age=0",
+        "User-Agent": "surge-cli-verify/1.1",
+    })
+    status, body, err = None, "", None
+    try:
+        with urllib.request.urlopen(req, timeout=args.timeout) as r:
+            status = r.status
+            body = r.read().decode("utf-8", "replace")
+    except Exception as e:  # noqa: BLE001 — report any fetch failure verbatim
+        err = f"{type(e).__name__}: {e}"
+    missing = [m for m in (args.contains or []) if m not in body] if body else list(args.contains or [])
+    payload = {
+        "ok": err is None and status == 200 and not missing,
+        "fetched_url": bust,
+        "http_status": status,
+        "bytes": len(body),
+        "required_markers": args.contains,
+        "missing_markers": missing,
+        "error": err,
+    }
+    _emit(payload, fmt=args.format, text_fn=lambda p: (
+        f"{'[OK]' if p['ok'] else '[FAIL]'} {p['fetched_url']} "
+        f"(http {p['http_status']}, {p['bytes']} bytes)\n"
+        + (f"missing markers: {p['missing_markers']}\n" if p["missing_markers"] else "")
+        + (f"{p['error']}\n" if p["error"] else "")
+        + ("live content verified" if p["ok"] else "live content does NOT match — republish and re-verify")
+    ))
+    return 0 if payload["ok"] else 2
 
 
 def cmd_simple(args: argparse.Namespace, surge_args: List[str],
@@ -264,8 +327,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-check", action="store_true", help="Skip pre-flight project check.")
     p.add_argument("--force", action="store_true",
                    help="Publish even if the pre-flight check reports issues.")
+    p.add_argument("--verify-contains", action="append", metavar="MARKER", default=[],
+                   help="After publish, fetch the live URL and require this marker "
+                        "(repeatable). Content-level verification, not just status codes.")
     _add_common(p)
     p.set_defaults(func=cmd_publish)
+
+    # verify
+    p = sub.add_parser("verify", help="Content-level verification of a live URL.")
+    p.add_argument("url", help="Live URL to fetch (cache-busted automatically).")
+    p.add_argument("--contains", action="append", metavar="MARKER", default=[],
+                   help="Marker that must appear in the page body (repeatable; "
+                        "all must match). Pick markers unique to the NEW revision.")
+    _add_common(p)
+    p.set_defaults(func=cmd_verify)
 
     # list
     p = sub.add_parser("list", help="List projects, or a project's revisions.")
